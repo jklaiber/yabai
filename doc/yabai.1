@@ -2,12 +2,12 @@
 .\"     Title: yabai
 .\"    Author: [see the "AUTHOR(S)" section]
 .\" Generator: Asciidoctor 2.0.16
-.\"      Date: 2022-10-20
+.\"      Date: 2022-12-28
 .\"    Manual: Yabai Manual
 .\"    Source: Yabai
 .\"  Language: English
 .\"
-.TH "YABAI" "1" "2022-10-20" "Yabai" "Yabai Manual"
+.TH "YABAI" "1" "2022-12-28" "Yabai" "Yabai Manual"
 .ie \n(.g .ds Aq \(aq
 .el       .ds Aq '
 .ss \n[.ss] 0
@@ -166,6 +166,11 @@ Specify which display a newly created window should be managed in.
 Specify whether managed windows should become the first or second leaf\-node.
 .RE
 .sp
+\fBwindow_zoom_persist\fP [\fI<BOOL_SEL>\fP]
+.RS 4
+Windows will keep their zoom\-state through layout changes.
+.RE
+.sp
 \fBwindow_topmost\fP [\fI<BOOL_SEL>\fP]
 .RS 4
 Make floating windows stay on top.
@@ -201,6 +206,13 @@ Duration of window frame animation. If 0.0, the change in dimension is not anima
 Requires Screen Recording permissions.
 .br
 System Integrity Protection must be partially disabled.
+.RE
+.sp
+\fBwindow_animation_frame_rate\fP [\fI<integer number>\fP]
+.RS 4
+Frame rate (expressed in frames per second) of window frame animation.
+.br
+This setting does nothing if \fBwindow_animation_duration\fP is set to 0.0.
 .RE
 .sp
 \fBactive_window_opacity\fP [\fI<FLOAT_SEL>\fP]

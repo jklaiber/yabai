@@ -136,41 +136,46 @@ static inline float window_node_get_gap(struct view *view)
 }
 
 #define area_ax_truncate(a)  \
-    a.x = (int)(a.x + 0.5f); \
-    a.y = (int)(a.y + 0.5f); \
-    a.w = (int)(a.w + 0.5f); \
-    a.h = (int)(a.h + 0.5f);
+    a->x = (int)(a->x + 0.5f); \
+    a->y = (int)(a->y + 0.5f); \
+    a->w = (int)(a->w + 0.5f); \
+    a->h = (int)(a->h + 0.5f);
 
-static void area_make_pair(struct view *view, struct window_node *node)
+static void area_make_pair(enum window_node_split split, float gap, float ratio, struct area *parent_area, struct area *left_area, struct area *right_area)
+{
+    if (split == SPLIT_Y) {
+        *left_area = *parent_area;
+        left_area->w *= ratio;
+        left_area->w -= gap;
+
+        *right_area = *parent_area;
+        right_area->x += (parent_area->w * ratio);
+        right_area->w *= (1 - ratio);
+        right_area->x += gap;
+        right_area->w -= gap;
+    } else {
+        *left_area = *parent_area;
+        left_area->h *= ratio;
+        left_area->h -= gap;
+
+        *right_area = *parent_area;
+        right_area->y += (parent_area->h * ratio);
+        right_area->h *= (1 - ratio);
+        right_area->y += gap;
+        right_area->h -= gap;
+    }
+
+    area_ax_truncate(left_area);
+    area_ax_truncate(right_area);
+}
+
+static void area_make_pair_for_node(struct view *view, struct window_node *node)
 {
     enum window_node_split split = window_node_get_split(node);
     float ratio = window_node_get_ratio(node);
     float gap   = window_node_get_gap(view);
 
-    if (split == SPLIT_Y) {
-        node->left->area = node->area;
-        node->left->area.w *= ratio;
-        node->left->area.w -= gap;
-
-        node->right->area = node->area;
-        node->right->area.x += (node->area.w * ratio);
-        node->right->area.w *= (1 - ratio);
-        node->right->area.x += gap;
-        node->right->area.w -= gap;
-    } else {
-        node->left->area = node->area;
-        node->left->area.h *= ratio;
-        node->left->area.h -= gap;
-
-        node->right->area = node->area;
-        node->right->area.y += (node->area.h * ratio);
-        node->right->area.h *= (1 - ratio);
-        node->right->area.y += gap;
-        node->right->area.h -= gap;
-    }
-
-    area_ax_truncate(node->left->area);
-    area_ax_truncate(node->right->area);
+    area_make_pair(split, gap, ratio, &node->area, &node->left->area, &node->right->area);
 
     node->split = split;
     node->ratio = ratio;
@@ -249,7 +254,9 @@ static void window_node_split(struct view *view, struct window_node *node, struc
     struct window_node *right = malloc(sizeof(struct window_node));
     memset(right, 0, sizeof(struct window_node));
 
-    struct window_node *zoom = !node->zoom
+    struct window_node *zoom = !g_space_manager.window_zoom_persist
+                             ? NULL
+                             : !node->zoom
                              ? NULL
                              : node->zoom == node->parent
                              ? node
@@ -283,13 +290,13 @@ static void window_node_split(struct view *view, struct window_node *node, struc
     node->right = right;
     node->zoom  = NULL;
 
-    area_make_pair(view, node);
+    area_make_pair_for_node(view, node);
 }
 
 void window_node_update(struct view *view, struct window_node *node)
 {
     if (window_node_is_intermediate(node)) {
-        area_make_pair(view, node->parent);
+        area_make_pair_for_node(view, node->parent);
     }
 
     if (window_node_is_leaf(node)) {
@@ -311,6 +318,16 @@ static void window_node_destroy(struct window_node *node)
 
     insert_feedback_destroy(node);
     free(node);
+}
+
+static void window_node_clear_zoom(struct window_node *node)
+{
+    node->zoom = NULL;
+
+    if (!window_node_is_leaf(node)) {
+        window_node_clear_zoom(node->left);
+        window_node_clear_zoom(node->right);
+    }
 }
 
 void window_node_capture_windows(struct window_node *node, struct window_capture **window_list)
@@ -646,7 +663,9 @@ struct window_node *view_remove_window_node(struct view *view, struct window *wi
 
     parent->left      = NULL;
     parent->right     = NULL;
-    parent->zoom      = !child->zoom
+    parent->zoom      = !g_space_manager.window_zoom_persist
+                      ? NULL
+                      : !child->zoom
                       ? NULL
                       : child->zoom == parent
                       ? parent->parent
@@ -663,7 +682,9 @@ struct window_node *view_remove_window_node(struct view *view, struct window *wi
     if (window_node_is_intermediate(child) && !window_node_is_leaf(child)) {
         parent->left          = child->left;
         parent->left->parent  = parent;
-        parent->left->zoom    = !child->left->zoom
+        parent->left->zoom    = !g_space_manager.window_zoom_persist
+                              ? NULL
+                              : !child->left->zoom
                               ? NULL
                               : child->left->zoom == child
                               ? parent
@@ -671,11 +692,17 @@ struct window_node *view_remove_window_node(struct view *view, struct window *wi
 
         parent->right         = child->right;
         parent->right->parent = parent;
-        parent->right->zoom   = !child->right->zoom
+        parent->right->zoom   = !g_space_manager.window_zoom_persist
+                              ? NULL
+                              : !child->right->zoom
                               ? NULL
                               : child->right->zoom == child
                               ? parent
                               : view->root;
+
+        if (!g_space_manager.window_zoom_persist) {
+            window_node_clear_zoom(parent);
+        }
 
         window_node_update(view, parent->left);
         window_node_update(view, parent->right);

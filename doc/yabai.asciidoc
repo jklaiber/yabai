@@ -128,6 +128,9 @@ Global Settings
 *window_placement* ['first_child|second_child']::
     Specify whether managed windows should become the first or second leaf-node.
 
+*window_zoom_persist* ['<BOOL_SEL>']::
+    Windows will keep their zoom-state through layout changes.
+
 *window_topmost* ['<BOOL_SEL>']::
     Make floating windows stay on top. +
     System Integrity Protection must be partially disabled.
@@ -148,6 +151,10 @@ Global Settings
     Duration of window frame animation. If 0.0, the change in dimension is not animated. +
     Requires Screen Recording permissions. +
     System Integrity Protection must be partially disabled.
+
+*window_animation_frame_rate* ['<integer number>']::
+    Frame rate (expressed in frames per second) of window frame animation. +
+    This setting does nothing if *window_animation_duration* is set to 0.0.
 
 *active_window_opacity* ['<FLOAT_SEL>']::
     Opacity of the focused window. +

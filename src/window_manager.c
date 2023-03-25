@@ -560,7 +560,7 @@ void *window_manager_animate_window_list_thread_proc(void *data)
     struct window_animation_context *context = data;
     int animation_count = buf_len(context->animation_list);
 
-    ANIMATE(context->animation_connection, context->animation_duration, ease_out_cubic, {
+    ANIMATE(context->animation_connection, context->animation_frame_rate, context->animation_duration, ease_out_cubic, {
         for (int i = 0; i < animation_count; ++i) {
             if (context->animation_list[i].skip) continue;
 
@@ -600,6 +600,7 @@ void window_manager_animate_window_list_async(struct window_capture *window_list
 
     SLSNewConnection(0, &context->animation_connection);
     context->animation_duration = g_window_manager.window_animation_duration;
+    context->animation_frame_rate = g_window_manager.window_animation_frame_rate;
     context->animation_list = NULL;
 
     for (int i = 0; i < window_count; ++i) {
@@ -1201,6 +1202,15 @@ struct window *window_manager_find_second_cousin_for_managed_window(struct windo
 
 static void window_manager_make_key_window(ProcessSerialNumber *window_psn, uint32_t window_id)
 {
+    //
+    // :SynthesizedEvent
+    //
+    // NOTE(koekeishiya): These events will be picked up by an event-tap
+    // registered at the "Annotated Session" location; specifying that an
+    // event-tap is placed at the point where session events have been
+    // annotated to flow to an application.
+    //
+
     uint8_t bytes1[0xf8] = { [0x04] = 0xf8, [0x08] = 0x01, [0x3a] = 0x10 };
     uint8_t bytes2[0xf8] = { [0x04] = 0xf8, [0x08] = 0x02, [0x3a] = 0x10 };
 
@@ -1221,10 +1231,13 @@ void window_manager_focus_window_without_raise(ProcessSerialNumber *window_psn, 
         memcpy(bytes1 + 0x3c, &g_window_manager.focused_window_id, sizeof(uint32_t));
         SLPSPostEventRecordTo(&g_window_manager.focused_window_psn, bytes1);
 
+        //
         // @hack
         // Artificially delay the activation by 1ms. This is necessary
         // because some applications appear to be confused if both of
         // the events appear instantaneously.
+        //
+
         usleep(10000);
 
         uint8_t bytes2[0xf8] = { [0x04] = 0xf8, [0x08] = 0x0d, [0x8a] = 0x01 };
@@ -1636,7 +1649,9 @@ enum window_op_error window_manager_warp_window(struct space_manager *sm, struct
 
     if (a_node == b_node) return WINDOW_OP_ERROR_SAME_STACK;
 
-    if (a_node->parent == b_node->parent && a_node->window_count == 1) {
+    if (a_node->parent && b_node->parent &&
+        a_node->parent == b_node->parent &&
+        a_node->window_count == 1) {
         if (window_node_contains_window(b_node, b_view->insertion_point)) {
             b_node->parent->split = b_node->split;
             b_node->parent->child = b_node->child;
@@ -1663,6 +1678,31 @@ enum window_op_error window_manager_warp_window(struct space_manager *sm, struct
         }
     } else {
         if (a_view->sid == b_view->sid) {
+
+            //
+            // :NaturalWarp
+            //
+            // NOTE(koekeishiya): Precalculate both target areas and select the one that has the closest distance to the source area.
+            // This allows the warp to feel more natural in terms of where the window is placed on screen, however, this is only utilized
+            // for warp operations where both operands belong to the same space. There may be a better system to handle this if/when multiple
+            // monitors should be supported.
+            //
+
+            struct area cf, cs;
+            area_make_pair(window_node_get_split(b_node), window_node_get_gap(b_view), window_node_get_ratio(b_node), &b_node->area, &cf, &cs);
+
+            CGPoint ca = { (int)(0.5f + a_node->area.x + a_node->area.w / 2.0f), (int)(0.5f + a_node->area.y + a_node->area.h / 2.0f) };
+            float dcf = powf((ca.x - (int)(0.5f + cf.x + cf.w / 2.0f)), 2.0f) + powf((ca.y - (int)(0.5f + cf.y + cf.h / 2.0f)), 2.0f);
+            float dcs = powf((ca.x - (int)(0.5f + cs.x + cs.w / 2.0f)), 2.0f) + powf((ca.y - (int)(0.5f + cs.y + cs.h / 2.0f)), 2.0f);
+
+            if (dcf < dcs) {
+                b_node->child = CHILD_FIRST;
+            } else if (dcf > dcs) {
+                b_node->child = CHILD_SECOND;
+            } else {
+                b_node->child = window_node_is_left_child(a_node) ? CHILD_FIRST : CHILD_SECOND;
+            }
+
             struct window_node *a_node_rm = view_remove_window_node(a_view, a);
             struct window_node *a_node_add = view_add_window_node_with_insertion_point(b_view, a, b->id);
 
@@ -1685,6 +1725,14 @@ enum window_op_error window_manager_warp_window(struct space_manager *sm, struct
                     _SLPSSetFrontProcessWithOptions(&g_process_manager.finder_psn, 0, kCPSNoWindows);
                 }
             }
+
+            //
+            // :NaturalWarp
+            //
+            // TODO(koekeishiya): Warp operations with operands that belong to different monitors does not yet implement a heuristic to select
+            // the target area that feels the most natural in terms of where the window is placed on screen. Is it possible to do better when
+            // warping between spaces that belong to the same monitor as well??
+            //
 
             space_manager_untile_window(sm, a_view, a);
             window_manager_remove_managed_window(wm, a->id);
@@ -1995,10 +2043,12 @@ void window_manager_toggle_window_parent(struct space_manager *sm, struct window
     struct window_node *node = view_find_window_node(view, window->id);
     assert(node);
 
+    if (!node->parent) return;
+
     if (node->zoom == node->parent) {
         node->zoom = NULL;
         window_node_flush(node);
-    } else if (node->parent) {
+    } else {
         node->zoom = node->parent;
         window_node_flush(node);
     }
@@ -2011,6 +2061,8 @@ void window_manager_toggle_window_fullscreen(struct space_manager *sm, struct wi
 
     struct window_node *node = view_find_window_node(view, window->id);
     assert(node);
+
+    if (node == view->root) return;
 
     if (node->zoom == view->root) {
         node->zoom = NULL;
@@ -2235,6 +2287,7 @@ void window_manager_init(struct window_manager *wm)
     wm->normal_window_opacity = 1.0f;
     wm->window_opacity_duration = 0.0f;
     wm->window_animation_duration = 0.0f;
+    wm->window_animation_frame_rate = 120;
     wm->insert_feedback_windows = NULL;
     wm->insert_feedback_color = rgba_color_from_hex(0xffd75f5f);
     wm->active_border_color = rgba_color_from_hex(0xff775759);
